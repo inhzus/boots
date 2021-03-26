@@ -1,0 +1,5 @@
+clang++
+-std=c++2a
+-Iinclude
+-Isrc
+-DSPDLOG_FMT_EXTERNAL
