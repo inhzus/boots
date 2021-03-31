@@ -1,4 +1,6 @@
 #pragma once
+#include <arpa/inet.h>
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -10,7 +12,7 @@
 namespace boots {
 class EventLoop;
 class DnsResolver : public std::enable_shared_from_this<DnsResolver> {
-public:
+ public:
   using CallbackFunc =
       std::function<void(const std::string &hostname, const std::string &ip,
                          const std::string &error)>;
@@ -18,20 +20,20 @@ public:
   void Init();
   void Resolve(const std::string &hostname, CallbackFunc callback);
 
-private:
+ private:
   void SendReq(const std::string &hostname);
 
-  void Callback(int fd, uint32_t events);
+  void Callback(int fd, uint32_t events) const;
   void AddToLoop();
   void ParseResolv();
   void ParseHosts();
 
   EventLoop *loop_;
-  int fd_;
+  int fd_{};
   std::unordered_map<std::string, std::string> hostnames_{};
   std::unordered_map<std::string, std::vector<CallbackFunc>>
       hostname_callbacks_{};
-  std::vector<std::string> servers_{};
+  std::vector<sockaddr_in> servers_{};
   LRUCache<std::string, std::string> cache_{300};
 };
-} // namespace boots
+}  // namespace boots

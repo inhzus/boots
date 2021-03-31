@@ -1,12 +1,11 @@
 #pragma once
 #include <arpa/inet.h>
+
 #include <string_view>
 
-namespace boots {
-namespace net {
-bool IsIpv4(std::string_view s);
-bool IsIpv6(std::string_view s);
-bool IsIp(std::string_view s);
+namespace boots::net {
+bool ToIpv4(std::string_view s, sockaddr_storage *sa = nullptr);
+bool ToIpv6(std::string_view s, sockaddr_storage *sa = nullptr);
+bool ToIp(std::string_view s, sockaddr_storage *sa = nullptr);
 
-} // namespace net
-} // namespace boots
+}  // namespace boots::net

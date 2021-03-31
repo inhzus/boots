@@ -1,96 +1,31 @@
 #include "boots/dns_resolver.h"
-#include "boots/event_loop.h"
-#include "net.h"
-#include "util.h"
-#include <fstream>
-#include <memory>
-#include <random>
-#include <regex>
+
 #include <spdlog/spdlog.h>
-#include <sstream>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
+#include <memory>
+#include <regex>
+#include <sstream>
+
+#include "boots/event_loop.h"
+#include "dns_message.h"
+#include "net.h"
+#include "util.h"
+
 namespace boots {
-
-static const char *IP_DOT_DELIM = ".";
-
-#pragma pack(push, 1)
-struct HeaderSection {
-  uint16_t request_id{};
-  struct Flags {
-    unsigned char qr : 1 {};
-    unsigned char op_code : 4 {};
-    unsigned char aa : 1 {};
-    unsigned char tc : 1 {};
-    unsigned char rd : 1 {};
-    unsigned char ra : 1 {};
-    unsigned char z : 1 {};
-    unsigned char ad : 1 {};
-    unsigned char cd : 1 {};
-    unsigned char rcode : 4 {};
-  } flags{};
-  uint16_t questions{};
-  uint16_t answer_rr{};
-  uint16_t authority_rr{};
-  uint16_t additonal_rr{};
-  HeaderSection() : request_id{static_cast<decltype(request_id)>(rand())} {}
-  std::vector<uint8_t> ToPlain();
-};
-
-struct QuestionSection {
-  std::string qname{};
-  uint16_t qtype{};
-  uint16_t qclass{};
-  std::vector<uint8_t> ToPlain();
-};
-#pragma pack(pop)
-
-enum class QuestionType : uint16_t {
-  kA = 1,
-};
-
-enum class QuestionClass : uint16_t {
-  kIn = 1,
-};
-
-void InplaceHostToNetwork(uint16_t *x) { *x = htons(*x); }
-
-std::vector<uint8_t> HeaderSection::ToPlain() {
-  std::vector<uint8_t> res{};
-  res.resize(sizeof(HeaderSection));
-  str::SwapEndian(&request_id);
-  str::SwapEndian(&flags);
-  str::SwapEndian(&questions);
-  str::SwapEndian(&answer_rr);
-  str::SwapEndian(&authority_rr);
-  str::SwapEndian(&additonal_rr);
-  memcpy(res.data(), this, sizeof(HeaderSection));
-  return res;
-}
-
-std::vector<uint8_t> QuestionSection::ToPlain() {
-  std::vector<uint8_t> res{};
-  res.reserve(qname.size() + 2 + sizeof(qtype) + sizeof(qclass));
-  auto segments = str::Split(str::Trim(qname), IP_DOT_DELIM);
-  for (auto &segment : segments) {
-    res.push_back(static_cast<uint8_t>(segment.size()));
-    res.insert(res.end(), segment.begin(), segment.end());
-  }
-  res.push_back(0);
-
-  str::SwapEndian(&qtype);
-  str::SwapEndian(&qclass);
-  auto pos = res.size();
-  res.resize(pos + sizeof(qtype) + sizeof(qclass));
-  memcpy(res.data() + pos, &qtype, sizeof(qtype));
-  pos += sizeof(qtype);
-  memcpy(res.data() + pos, &qclass, sizeof(qclass));
-  return res;
-}
-
 DnsResolver::DnsResolver(EventLoop *loop, std::vector<std::string> servers)
-    : loop_{loop}, servers_{std::move(servers)} {}
+    : loop_{loop} {
+  for (const auto &s : servers) {
+    sockaddr_in sa{};
+    if (net::ToIpv4(s, reinterpret_cast<sockaddr_storage *>(&sa))) {
+      sa.sin_family = AF_INET;
+      sa.sin_port = 53;
+      str::SwapOrder(&sa.sin_port);
+      servers_.emplace_back(sa);
+    }
+  }
+}
 
 void DnsResolver::Init() {
   if (servers_.empty()) {
@@ -108,7 +43,7 @@ void DnsResolver::Resolve(const std::string &hostname, CallbackFunc callback) {
     return;
   }
 
-  if (net::IsIp(hostname)) {
+  if (net::ToIp(hostname)) {
     callback(hostname, hostname, {});
     return;
   }
@@ -135,31 +70,15 @@ void DnsResolver::Resolve(const std::string &hostname, CallbackFunc callback) {
 }
 
 void DnsResolver::SendReq(const std::string &hostname) {
-  HeaderSection header{};
-  header.questions = 1;
-  header.flags.ra = 1;
-  auto plain = header.ToPlain();
-
-  QuestionSection question{};
-  question.qname = hostname;
-  question.qtype = static_cast<uint16_t>(QuestionType::kA);
-  question.qclass = static_cast<uint16_t>(QuestionClass::kIn);
-  auto question_plain = question.ToPlain();
-  plain.insert(plain.end(), question_plain.begin(), question_plain.end());
+  auto plain = SerializeDnsRequest(hostname);
 
   for (const auto &server : servers_) {
-    struct sockaddr_in sa {};
-    memset(&sa, 0, sizeof(sa));
-    sa.sin_family = AF_INET;
-    sa.sin_port = 53;
-    str::SwapEndian(&sa.sin_port);
-    inet_pton(AF_INET, server.data(), &sa.sin_addr);
-    int n = sendto(fd_, plain.data(), plain.size(), 0, (struct sockaddr *)&sa,
-           sizeof(sa));
+    sendto(fd_, plain.data(), plain.size(), 0, (struct sockaddr *)&server,
+           sizeof(server));
   }
 }
 
-void DnsResolver::Callback(int fd, uint32_t events) {
+void DnsResolver::Callback(int fd, uint32_t events) const {
   if (fd != fd_) {
     return;
   }
@@ -180,12 +99,18 @@ void DnsResolver::Callback(int fd, uint32_t events) {
   socklen_t sa_len{};
   int n = recvfrom(fd_, buf.get(), size, 0, (struct sockaddr *)&sa, &sa_len);
   if (n != size) {
-    spdlog::error("[DnsResolver] recv length is not equal to peeked length, "
-                  "n={}, errno={}",
-                  n, errno);
+    spdlog::error(
+        "[DnsResolver] recv length is not equal to peeked length, "
+        "n={}, errno={}",
+        n, errno);
   }
 
   spdlog::info("length: {}", n);
+  std::string_view s(buf.get(), size);
+  DnsResponse response{};
+  DeserializeDnsResponse(s, &response);
+  int i = 0;
+  ++i;
 }
 
 void DnsResolver::AddToLoop() {
@@ -206,13 +131,23 @@ void DnsResolver::ParseResolv() {
     }
 
     std::string server = match[1].str();
-    if (net::IsIpv4(server)) {
-      servers_.emplace_back(server);
+    sockaddr_in sa{};
+    if (net::ToIpv4(server, reinterpret_cast<sockaddr_storage *>(&sa))) {
+      sa.sin_family = AF_INET;
+      sa.sin_port = 53;
+      str::SwapOrder(&sa.sin_port);
+      servers_.emplace_back(sa);
     }
   }
 
   if (servers_.empty()) {
-    servers_.assign({"8.8.8.8", "8.8.4.4"});
+    constexpr std::array<std::string_view, 2> kGoogleDnsServers{"8.8.8.8",
+                                                                "4.4.4.4"};
+    for (const auto &s : kGoogleDnsServers) {
+      sockaddr_in sa{};
+      net::ToIpv4(s, reinterpret_cast<sockaddr_storage *>(&sa));
+      servers_.emplace_back(sa);
+    }
   }
 }
 
@@ -231,7 +166,7 @@ void DnsResolver::ParseHosts() {
       continue;
     }
     std::string ip{parts[0]};
-    if (!net::IsIp(ip)) {
+    if (!net::ToIp(ip)) {
       continue;
     }
 
@@ -242,4 +177,4 @@ void DnsResolver::ParseHosts() {
   }
 }
 
-} // namespace boots
+}  // namespace boots

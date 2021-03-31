@@ -1,4 +1,5 @@
 #pragma once
+#include <bit>
 #include <climits>
 #include <fstream>
 #include <string>
@@ -9,29 +10,47 @@ namespace boots {
 
 namespace str {
 
-extern const char *kDelims;
+extern const char *kDefaultDelimiters;
 
 std::string_view LeftTrim(std::string_view s,
-                          std::string_view delims = kDelims);
+                          std::string_view delimiters = kDefaultDelimiters);
 std::string_view RightTrim(std::string_view s,
-                           std::string_view delims = kDelims);
-std::string_view Trim(std::string_view s, std::string_view delims = kDelims);
+                           std::string_view delimiters = kDefaultDelimiters);
+std::string_view Trim(std::string_view s, std::string_view delimiters = kDefaultDelimiters);
 
 std::vector<std::string_view> Split(std::string_view s,
-                                    std::string_view delims = kDelims);
+                                    std::string_view delimiters = kDefaultDelimiters);
+std::string Join(std::string_view delimiter, const std::vector<std::string> &v);
 
-template <typename T> void SwapEndian(T *u) {
-  static_assert(CHAR_BIT == 8, "CHAR_BIT != 8");
-  union Union {
-    T v{};
-    unsigned char u8[sizeof(T)];
-    Union() {}
-  } source, dest;
-  source.v = *u;
-  for (size_t k = 0; k < sizeof(T); k++)
-    dest.u8[k] = source.u8[sizeof(T) - k - 1];
-  *u = dest.v;
+namespace {
+template <size_t> struct GenInt {};
+template <> struct GenInt<sizeof(uint8_t)> { using type = uint8_t; };
+template <> struct GenInt<sizeof(uint16_t)> { using type = uint16_t; };
+template <> struct GenInt<sizeof(uint32_t)> { using type = uint32_t; };
+template <> struct GenInt<sizeof(uint64_t)> { using type = uint64_t; };
+
+template <size_t kSize> using GenIntType = typename GenInt<kSize>::type;
+
+template <typename T> T SwapOrder(T val) {
+  if constexpr (std::endian::little != std::endian::native) {
+    return;
+  }
+
+  T swapped{};
+  constexpr auto totalBytes = sizeof(T);
+  using IntType = GenIntType<totalBytes>;
+  auto *src = reinterpret_cast<IntType *>(&val);
+  auto *dest = reinterpret_cast<IntType *>(&swapped);
+  for (int i = 0; i < totalBytes; ++i) {
+    *dest |= (*src >> (8 * (totalBytes - i - 1)) & 0xFF) << (8 * i);
+  }
+  return swapped;
 }
+
+} // namespace
+
+template <typename T> void SwapOrder(T *val) { *val = SwapOrder(*val); }
+
 } // namespace str
 
 namespace file {
@@ -58,8 +77,8 @@ public:
   };
 
   explicit Lines(std::string_view filename) : filename_{filename} {}
-  Iterator begin() const { return Iterator{filename_}; }
-  Iterator end() const { return Iterator{}; }
+  [[nodiscard]] Iterator begin() const { return Iterator{filename_}; }
+  [[nodiscard]] Iterator end() const { return Iterator{}; }
 
 private:
   std::string filename_;

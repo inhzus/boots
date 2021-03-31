@@ -1,48 +1,63 @@
 #include "util.h"
 
+#include <numeric>
+#include <string>
+
 namespace boots {
 namespace str {
 
-const char *kDelims = " \t";
+const char *kDefaultDelimiters = " \t";
 
-std::string_view LeftTrim(std::string_view s, std::string_view delims) {
-  const auto pos = s.find_first_not_of(delims);
+std::string_view LeftTrim(std::string_view s, std::string_view delimiters) {
+  const auto pos = s.find_first_not_of(delimiters);
   if (std::string_view::npos != pos) {
     s = s.substr(pos);
   }
   return s;
 }
 
-std::string_view RightTrim(std::string_view s, std::string_view delims) {
-  const auto pos = s.find_last_not_of(delims);
+std::string_view RightTrim(std::string_view s, std::string_view delimiters) {
+  const auto pos = s.find_last_not_of(delimiters);
   if (std::string_view::npos != pos) {
     s = s.substr(0, pos + 1);
   }
   return s;
 }
 
-std::string_view Trim(std::string_view s, std::string_view delims) {
-  s = LeftTrim(s, delims);
-  return RightTrim(s, delims);
+std::string_view Trim(std::string_view s, std::string_view delimiters) {
+  s = LeftTrim(s, delimiters);
+  return RightTrim(s, delimiters);
 }
 
 std::vector<std::string_view> Split(std::string_view s,
-                                    std::string_view delims) {
+                                    std::string_view delimiters) {
   std::vector<std::string_view> res{};
   size_t cur = 0;
   while (cur < s.size() && cur != s.npos) {
-    const auto next = s.find_first_of(delims, cur);
+    const auto next = s.find_first_of(delimiters, cur);
     if (next == s.npos) {
       res.emplace_back(s.substr(cur, s.size() - cur));
       break;
     }
     res.emplace_back(s.substr(cur, next - cur));
-    cur = s.find_first_not_of(delims, next);
+    cur = s.find_first_not_of(delimiters, next);
   }
   return res;
 }
 
-} // namespace str
+std::string Join(std::string_view delimiter,
+                 const std::vector<std::string> &v) {
+  if (v.empty()) return std::string();
+  return std::accumulate(
+      v.begin() + 1, v.end(), v[0],
+      [delimiter](const std::string &lhs, const std::string &rhs) {
+        std::string s{lhs};
+        s.reserve(lhs.size() + rhs.size() + delimiter.size());
+        return s.append(delimiter).append(rhs);
+      });
+}
+
+}  // namespace str
 
 namespace file {
 Lines::Iterator::Iterator() : file_{} {}
@@ -75,6 +90,6 @@ bool operator!=(const Lines::Iterator &lhs, const Lines::Iterator &rhs) {
   return !(lhs.eof_ && rhs.eof_);
 }
 
-} // namespace file
+}  // namespace file
 
-} // namespace boots
+}  // namespace boots
