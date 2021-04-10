@@ -1,6 +1,7 @@
 #pragma once
 #include <arpa/inet.h>
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -10,6 +11,7 @@
 #include "boots/lru_cache.h"
 
 namespace boots {
+class DnsResponse;
 class EventLoop;
 class DnsResolver : public std::enable_shared_from_this<DnsResolver> {
  public:
@@ -23,14 +25,16 @@ class DnsResolver : public std::enable_shared_from_this<DnsResolver> {
  private:
   void SendReq(const std::string &hostname);
 
-  void Callback(int fd, uint32_t events) const;
+  void Callback(int fd, uint32_t events);
+  void Handle(const DnsResponse &resp);
   void AddToLoop();
   void ParseResolv();
   void ParseHosts();
 
   EventLoop *loop_;
   int fd_{};
-  std::unordered_map<std::string, std::string> hostnames_{};
+  std::atomic<size_t> record_idx_{};
+  std::unordered_map<std::string, std::string> hosts_{};
   std::unordered_map<std::string, std::vector<CallbackFunc>>
       hostname_callbacks_{};
   std::vector<sockaddr_in> servers_{};

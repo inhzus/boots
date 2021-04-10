@@ -1,5 +1,6 @@
 #include "boots/dns_resolver.h"
 
+#include <fmt/format.h>
 #include <spdlog/spdlog.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -48,22 +49,32 @@ void DnsResolver::Resolve(const std::string &hostname, CallbackFunc callback) {
     return;
   }
 
-  auto it = hostnames_.find(hostname);
-  if (it != hostnames_.end()) {
+  auto it = hosts_.find(hostname);
+  if (it != hosts_.end()) {
+    spdlog::info("[DnsResolver.Resolve] hostname hits hosts, hostname={}",
+                 hostname);
     callback(hostname, it->second, {});
     return;
   }
 
   std::string ip{};
   if (cache_.Get(hostname, &ip)) {
+    spdlog::info(
+        "[DnsResolver.Resolve] hostname hits cache, hostname={}, ip={}",
+        hostname, ip);
     callback(hostname, ip, {});
     return;
   }
 
   auto cb_it = hostname_callbacks_.find(hostname);
   if (cb_it == hostname_callbacks_.end()) {
+    spdlog::info("[DnsResolver.Resolve] hostname resolving, hostname={}",
+                 hostname);
     hostname_callbacks_.insert({hostname, {std::move(callback)}});
   } else {
+    spdlog::info(
+        "[DnsResolver.Resolve] hostname querying, hostname={}",
+        hostname);
     cb_it->second.emplace_back(std::move(callback));
   }
   SendReq(hostname);
@@ -78,19 +89,20 @@ void DnsResolver::SendReq(const std::string &hostname) {
   }
 }
 
-void DnsResolver::Callback(int fd, uint32_t events) const {
+void DnsResolver::Callback(int fd, uint32_t events) {
   if (fd != fd_) {
     return;
   }
 
   if (events & EventLoop::kPollErr) {
-    spdlog::error("[DnsResolver] callback socket error, errno={}", errno);
+    spdlog::error("[DnsResolver.Callback] callback socket error, errno={}",
+                  errno);
     return;
   }
 
   int size{};
   if (ioctl(fd_, FIONREAD, &size) != 0) {
-    spdlog::error("[DnsResolver] ioctl read failed, errno={}", errno);
+    spdlog::error("[DnsResolver.Callback] ioctl read failed, errno={}", errno);
     return;
   }
 
@@ -100,17 +112,51 @@ void DnsResolver::Callback(int fd, uint32_t events) const {
   int n = recvfrom(fd_, buf.get(), size, 0, (struct sockaddr *)&sa, &sa_len);
   if (n != size) {
     spdlog::error(
-        "[DnsResolver] recv length is not equal to peeked length, "
+        "[DnsResolver.Callback] recv length is not equal to peeked length, "
         "n={}, errno={}",
         n, errno);
+    return;
   }
 
-  spdlog::info("length: {}", n);
   std::string_view s(buf.get(), size);
   DnsResponse response{};
-  DeserializeDnsResponse(s, &response);
-  int i = 0;
-  ++i;
+  bool ok = response.Deserialize(s);
+  if (!ok) {
+    return;
+  }
+
+  Handle(response);
+}
+
+void DnsResolver::Handle(const DnsResponse &resp) {
+  if (resp.questions.empty()) {
+    return;
+  }
+
+  const std::string &hostname = resp.questions[0].qname;
+  size_t idx = record_idx_++;
+  for (size_t i = 0; i < resp.records.size(); ++i) {
+    const auto &r = resp.records.at((i + idx) % resp.records.size());
+    if (r.bin.type == RecordType::A || r.bin.type == RecordType::AAAA) {
+      auto callbacks_it = hostname_callbacks_.find(hostname);
+      if (callbacks_it == hostname_callbacks_.end()) {
+        return;
+      }
+
+      auto callbacks = std::move(callbacks_it->second);
+      hostname_callbacks_.erase(callbacks_it);
+      std::string error_msg{};
+      if (r.ip.empty()) {
+        error_msg.assign(fmt::format("unknown hostname {}", hostname));
+      } else {
+        cache_.Put(hostname, r.ip);
+      }
+      for (const CallbackFunc &callback : callbacks) {
+        callback(hostname, r.ip, error_msg);
+      }
+      break;
+    }
+  }
 }
 
 void DnsResolver::AddToLoop() {
@@ -155,7 +201,7 @@ void DnsResolver::ParseHosts() {
   file::Lines lines{"/etc/hosts"};
   auto it = lines.begin();
   if (it == lines.end()) {
-    hostnames_.insert({"localhost", "127.0.0.1"});
+    hosts_.insert({"localhost", "127.0.0.1"});
     return;
   }
 
@@ -172,7 +218,7 @@ void DnsResolver::ParseHosts() {
 
     for (size_t i = 1; i < parts.size(); ++i) {
       std::string hostname{parts[i]};
-      hostnames_.insert({hostname, ip});
+      hosts_.insert({hostname, ip});
     }
   }
 }

@@ -161,7 +161,7 @@ std::string ParseIp(RecordType record_type, std::string_view data,
   return ip;
 }
 
-bool DeserializeDnsResponse(std::string_view s, DnsResponse *response) {
+bool DnsResponse::Deserialize(std::string_view s) {
   HeaderSection header{};
   bool ok{};
   size_t offset{header.Deserialize(s, &ok)};
@@ -172,13 +172,13 @@ bool DeserializeDnsResponse(std::string_view s, DnsResponse *response) {
   for (uint16_t i = 0; i < header.questions; ++i) {
     QuestionSection question{};
     offset += question.Deserialize(s, offset);
-    response->questions.push_back(std::move(question));
+    questions.push_back(std::move(question));
   }
 
   for (uint16_t i = 0; i < header.answer_rr; ++i) {
     RecordSection record{};
     offset += record.Deserialize(s, offset);
-    response->records.push_back(std::move(record));
+    records.push_back(std::move(record));
   }
   return true;
 }

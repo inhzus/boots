@@ -79,9 +79,10 @@ struct RecordSection {
 struct DnsResponse {
   std::vector<QuestionSection> questions{};
   std::vector<RecordSection> records{};
+
+  bool Deserialize(std::string_view s);
 };
 
 std::vector<uint8_t> SerializeDnsRequest(const std::string &hostname);
-bool DeserializeDnsResponse(std::string_view s, DnsResponse *response);
 
 }  // namespace boots

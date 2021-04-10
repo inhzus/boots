@@ -5,9 +5,14 @@ int main() {
   boots::EventLoop loop{};
   auto r = std::make_shared<boots::DnsResolver>(&loop);
   r->Init();
-  r->Resolve("baidu.com", [](const auto &, const auto &ip, const auto &) {
+  auto callback = [](const auto &, const auto &ip, const auto &) {
     printf("ip: %s\n", ip.data());
-  });
+  };
+  for (int i = 0; i < 3; ++i) {
+    r->Resolve("lws.dingtalk.com", callback);
+  }
+  r->Resolve("google.com", callback);
+  r->Resolve("baidu.com", callback);
   loop.Run();
   return 0;
 }
