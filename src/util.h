@@ -31,7 +31,9 @@ template <> struct GenInt<sizeof(uint64_t)> { using type = uint64_t; };
 
 template <size_t kSize> using GenIntType = typename GenInt<kSize>::type;
 
-template <typename T> T SwapOrder(T val) {
+} // namespace
+
+template <typename T> T Swap(T val) {
   if constexpr (std::endian::little != std::endian::native) {
     return;
   }
@@ -47,9 +49,7 @@ template <typename T> T SwapOrder(T val) {
   return swapped;
 }
 
-} // namespace
-
-template <typename T> void SwapOrder(T *val) { *val = SwapOrder(*val); }
+template <typename T> void InplaceSwap(T *val) { *val = Swap(*val); }
 
 } // namespace str
 

@@ -33,9 +33,9 @@ std::vector<std::string_view> Split(std::string_view s,
                                     std::string_view delimiters) {
   std::vector<std::string_view> res{};
   size_t cur = 0;
-  while (cur < s.size() && cur != s.npos) {
+  while (cur < s.size() && cur != std::string_view::npos) {
     const auto next = s.find_first_of(delimiters, cur);
-    if (next == s.npos) {
+    if (next == std::string_view::npos) {
       res.emplace_back(s.substr(cur, s.size() - cur));
       break;
     }
@@ -62,7 +62,7 @@ std::string Join(std::string_view delimiter,
 namespace file {
 Lines::Iterator::Iterator() : file_{} {}
 Lines::Iterator::Iterator(const std::string &filename)
-    : file_{filename, file_.in} {
+    : file_{filename, std::ifstream::in} {
   eof_ = !file_.is_open();
   ++*this;
 }

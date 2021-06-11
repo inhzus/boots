@@ -18,7 +18,8 @@ class DnsResolver : public std::enable_shared_from_this<DnsResolver> {
   using CallbackFunc =
       std::function<void(const std::string &hostname, const std::string &ip,
                          const std::string &error)>;
-  explicit DnsResolver(EventLoop *loop, std::vector<std::string> servers = {});
+  explicit DnsResolver(EventLoop *loop,
+                       const std::vector<std::string> &servers = {});
   void Init();
   void Resolve(const std::string &hostname, CallbackFunc callback);
 

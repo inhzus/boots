@@ -1,28 +1,26 @@
 #include "boots/dns_resolver.h"
 
 #include <fmt/format.h>
-#include <spdlog/spdlog.h>
 #include <sys/ioctl.h>
-#include <sys/socket.h>
 
-#include <memory>
 #include <regex>
-#include <sstream>
 
 #include "boots/event_loop.h"
 #include "dns_message.h"
+#include "log.h"
 #include "net.h"
 #include "util.h"
 
 namespace boots {
-DnsResolver::DnsResolver(EventLoop *loop, std::vector<std::string> servers)
+DnsResolver::DnsResolver(EventLoop *loop,
+                         const std::vector<std::string> &servers)
     : loop_{loop} {
   for (const auto &s : servers) {
     sockaddr_in sa{};
     if (net::ToIpv4(s, reinterpret_cast<sockaddr_storage *>(&sa))) {
       sa.sin_family = AF_INET;
       sa.sin_port = 53;
-      str::SwapOrder(&sa.sin_port);
+      str::InplaceSwap(&sa.sin_port);
       servers_.emplace_back(sa);
     }
   }
@@ -72,9 +70,8 @@ void DnsResolver::Resolve(const std::string &hostname, CallbackFunc callback) {
                  hostname);
     hostname_callbacks_.insert({hostname, {std::move(callback)}});
   } else {
-    spdlog::info(
-        "[DnsResolver.Resolve] hostname querying, hostname={}",
-        hostname);
+    spdlog::info("[DnsResolver.Resolve] hostname querying, hostname={}",
+                 hostname);
     cb_it->second.emplace_back(std::move(callback));
   }
   SendReq(hostname);
@@ -100,7 +97,7 @@ void DnsResolver::Callback(int fd, uint32_t events) {
     return;
   }
 
-  int size{};
+  long size{};
   if (ioctl(fd_, FIONREAD, &size) != 0) {
     spdlog::error("[DnsResolver.Callback] ioctl read failed, errno={}", errno);
     return;
@@ -109,7 +106,7 @@ void DnsResolver::Callback(int fd, uint32_t events) {
   std::unique_ptr<char[]> buf{new char[size]};
   struct sockaddr_in sa {};
   socklen_t sa_len{};
-  int n = recvfrom(fd_, buf.get(), size, 0, (struct sockaddr *)&sa, &sa_len);
+  auto n = recvfrom(fd_, buf.get(), size, 0, (struct sockaddr *)&sa, &sa_len);
   if (n != size) {
     spdlog::error(
         "[DnsResolver.Callback] recv length is not equal to peeked length, "
@@ -181,7 +178,7 @@ void DnsResolver::ParseResolv() {
     if (net::ToIpv4(server, reinterpret_cast<sockaddr_storage *>(&sa))) {
       sa.sin_family = AF_INET;
       sa.sin_port = 53;
-      str::SwapOrder(&sa.sin_port);
+      str::InplaceSwap(&sa.sin_port);
       servers_.emplace_back(sa);
     }
   }

@@ -8,7 +8,7 @@
 
 namespace boots {
 
-static const char *IP_DOT_DELIM = ".";
+static const char *IP_DOT_DELIMITER = ".";
 
 size_t ParseName(std::string_view s, size_t offset, std::string *name);
 std::string ParseIp(RecordType record_type, std::string_view data,
@@ -41,12 +41,12 @@ void HeaderSection::Serialize(std::vector<uint8_t> *s) {
 }
 
 void HeaderSection::SwapSelf() {
-  str::SwapOrder(&request_id);
-  str::SwapOrder(&flags);
-  str::SwapOrder(&questions);
-  str::SwapOrder(&answer_rr);
-  str::SwapOrder(&authority_rr);
-  str::SwapOrder(&additional_rr);
+  str::InplaceSwap(&request_id);
+  str::InplaceSwap(&flags);
+  str::InplaceSwap(&questions);
+  str::InplaceSwap(&answer_rr);
+  str::InplaceSwap(&authority_rr);
+  str::InplaceSwap(&additional_rr);
 }
 
 QuestionSection QuestionSection::BuildRequest(const std::string &hostname) {
@@ -61,22 +61,22 @@ size_t QuestionSection::Deserialize(std::string_view data, size_t offset) {
   size_t name_len = ParseName(data, offset, &qname);
   std::string_view s = data.substr(offset + name_len);
   memcpy(&bin, s.data(), sizeof(bin));
-  str::SwapOrder(&bin.qtype);
-  str::SwapOrder(&bin.qclass);
+  str::InplaceSwap(&bin.qtype);
+  str::InplaceSwap(&bin.qclass);
   return name_len + sizeof(bin);
 }
 
 void QuestionSection::Serialize(std::vector<uint8_t> *v) {
   v->reserve(v->size() + qname.size() + 2 + sizeof(bin));
-  auto segments = str::Split(str::Trim(qname), IP_DOT_DELIM);
+  auto segments = str::Split(str::Trim(qname), IP_DOT_DELIMITER);
   for (auto &segment : segments) {
     v->push_back(static_cast<uint8_t>(segment.size()));
     v->insert(v->end(), segment.begin(), segment.end());
   }
   v->push_back(0);
 
-  str::SwapOrder(&bin.qtype);
-  str::SwapOrder(&bin.qclass);
+  str::InplaceSwap(&bin.qtype);
+  str::InplaceSwap(&bin.qclass);
   auto len = v->size();
   v->resize(v->size() + sizeof(bin));
   memcpy(v->data() + len, &bin.qtype, sizeof(bin.qtype));
@@ -88,10 +88,10 @@ size_t RecordSection::Deserialize(std::string_view data, size_t offset) {
   size_t name_len = ParseName(data, offset, &name);
   std::string_view s = data.substr(offset + name_len);
   memcpy(&bin, s.data(), sizeof(bin));
-  str::SwapOrder(&bin.type);
-  str::SwapOrder(&bin.clazz);
-  str::SwapOrder(&bin.ttl);
-  str::SwapOrder(&bin.rdlength);
+  str::InplaceSwap(&bin.type);
+  str::InplaceSwap(&bin.clazz);
+  str::InplaceSwap(&bin.ttl);
+  str::InplaceSwap(&bin.rdlength);
   ip = ParseIp(bin.type, data, offset + name_len + sizeof(bin), bin.rdlength);
   return name_len + sizeof(bin) + bin.rdlength;
 }
@@ -114,7 +114,7 @@ size_t ParseName(std::string_view s, size_t offset, std::string *name) {
     if ((i & 0b1100'0000) == 0b1100'0000) {
       uint16_t pointer{};
       memcpy(&pointer, s.data() + cur, sizeof(pointer));
-      str::SwapOrder(&pointer);
+      str::InplaceSwap(&pointer);
       pointer &= 0x3FFF;
       std::string pointer_name{};
       ParseName(s, pointer, &pointer_name);
